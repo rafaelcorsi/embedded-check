@@ -10,7 +10,6 @@ import re
 from sty import bg, ef, fg, rs
 from tabulate import tabulate
 
-sys.path.insert(0, './cppcheck')
 import cppcheckdata
 from misra import getArguments, isFunctionCall
 
