@@ -22,4 +22,3 @@ def test_rule_1_2_correct():
 
     stdout, stderr, return_code = run_check2(f"{test_name}.c.dump")
     assert return_code == 0, f"Expected return code 0, but got {return_code}"
-

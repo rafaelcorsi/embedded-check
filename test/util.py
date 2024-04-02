@@ -3,6 +3,8 @@ import subprocess
 
 def run_command(command):
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    if result.returncode > 0:
+        print(result.stderr)
     return result.stdout.decode('utf-8'), result.stderr.decode('utf-8'), result.returncode
 
 def run_cppcheck(file_path):
