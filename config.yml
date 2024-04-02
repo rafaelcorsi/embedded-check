@@ -1,0 +1,21 @@
+settings:
+  irs_names_modifiers:
+    - callback
+    - Handler
+
+  irs_var_types_exceptions:
+    - SemaphoreHandle_t
+    - TimerHandle_t
+    - QueueHandle_t
+
+  irs_config_callback:
+    - gpio_set_irq_enabled_with_callback
+
+rule_1_2:
+  id: notVolatileVarIRS
+  msg:
+    All global variables that are accessed from IRS must be declared as volatile to ensure that the compiler will not optimize it out.
+
+rule_1_3:
+  id: wrongUseOfVolatile
+  msg: Local variables should not be declared as volatile to ensure that the compiler will optimize it out.
