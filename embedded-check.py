@@ -93,11 +93,30 @@ class Dump:
 
 class CodeData:
     def __init__(self):
-        all_vars_with_ass = []
-        global_vars = []
-        global_vars_with_ass = []
-        irs_functions = []
-        irs_functions_names = []
+        self.all_vars_with_ass = []
+        self.global_vars = []
+        self.global_vars_with_ass = []
+        self.local_vars = []
+        self.isr_global_vars = []
+        self.isr_global_vars_id = []
+        self.isr_functions = []
+        self.isr_functions_names = []
+
+    def update(self):
+        local = [i for i in self.all_vars_with_ass if not i in self.global_vars or self.global_vars.remove(i)]
+        self.local_vars = local
+
+        self.isr_functions_names = [_.name for _ in self.isr_functions]
+
+        # detecr vars that are used by irs
+        isr_global_vars = []
+        isr_global_vars_id = []
+        for ass in self.all_vars_with_ass:
+            if ass["className"] in self.isr_functions_names:
+                isr_global_vars.append(ass)
+                isr_global_vars_id.append(ass['variable'].Id)
+        self.isr_global_vars = isr_global_vars
+        self.isr_global_vars_id = isr_global_vars_id
 
     def iterate_lists(self):
         for attr_name, attr_value in self.__dict__.items():
@@ -105,12 +124,22 @@ class CodeData:
                 for item in attr_value:
                     print(item)
 
-    def append(self, other):
-        for attr_name, other_list in other.__dict__.items():
-            if isinstance(other_list, list) and hasattr(self, attr_name):
-                self_list = getattr(self, attr_name)
-                if isinstance(self_list, list):
-                    self_list.extend(other_list)
+    def append(self, prop_name, other):
+        current_prop = getattr(self, prop_name, [])
+
+        if not isinstance(current_prop, list):
+            raise ValueError(f"Expected a list for '{prop_name}', got {type(current_prop)} instead.")
+
+        new_prop = current_prop + [i for i in other if i not in current_prop]
+
+        setattr(self, prop_name, new_prop)
+
+    def search_extern_origin(self, extern):
+        for v in self.isr_global_vars:
+            if v['variable'].nameToken.str == extern['variable'].nameToken.str:
+                return v
+        return None
+
 
 
 class RtosData:
@@ -118,17 +147,16 @@ class RtosData:
 
 
 class ExtractCodeInfo:
-    def __init__(self, dump, config):
+    def __init__(self, dump, code, config):
         self.config = config.config
         self.dump = dump
         self.cfg = self.dump.cfg
-        self.code = CodeData
 
-        self.code.all_vars_with_ass = self.get_all_vars_with_ass()
-        self.code.global_vars = self.get_global_vars()
-        self.code.global_vars_with_ass = self.get_global_vars_with_ass()
-        self.code.irs_functions = self.get_irs_functions()
-        self.code.irs_functions_names =  [func.name for func in self.code.irs_functions]
+        code.append('all_vars_with_ass', self.get_all_vars_with_ass())
+        code.append('global_vars', self.get_global_vars())
+        code.append('global_vars_with_ass', self.get_global_vars_with_ass())
+        code.append('isr_functions', self.get_isr_functions())
+        code.update()
 
     def get_all_vars_with_ass(self):
         ass = []
@@ -169,22 +197,22 @@ class ExtractCodeInfo:
                 vars.append(var)
         return vars
 
-    def is_funq_irs(self, f):
-        res = [ele for ele in self.config["settings"]['irs_names_modifiers'] if (ele in f.name)]
+    def is_funq_isr(self, f):
+        res = [ele for ele in self.config["settings"]['isr_names_modifiers'] if (ele in f.name)]
         return True if res else False
 
-    def get_irs_functions(self):
-        irs_funcs = []
+    def get_isr_functions(self):
+        isr_funcs = []
         # from modifiers name
         for f in self.cfg.functions:
-            if self.is_funq_irs(f):
+            if self.is_funq_isr(f):
                 if f != None:
-                    irs_funcs.append(f)
+                    isr_funcs.append(f)
 
         # from calling a function
         for token in self.cfg.tokenlist:
             if isFunctionCall(token):
-                if token.previous.str in self.config['settings']['irs_config_callback']:
+                if token.previous.str in self.config['settings']['isr_config_callback']:
                     func_arg = getArguments(token)[-1]
                     if func_arg.str == "&":
                         # using function pointer a.k &btn_callback
@@ -194,10 +222,10 @@ class ExtractCodeInfo:
                         func = func_arg
 
                     if func.function is not None:
-                        irs_funcs.append(func.function)
+                        isr_funcs.append(func.function)
 
         res = []
-        [res.append(x) for x in irs_funcs if x not in res]
+        [res.append(x) for x in isr_funcs if x not in res]
         return res
 
 
@@ -220,10 +248,9 @@ class ExtractRtosInfo:
 
 
 class embeddedCheck:
-    def __init__ (self, dump_file, ec_config, ec_code, ec_rtos, rtos ):
+    def __init__ (self, dump_file, ec_code, ec_config):
         self.config = ec_config.config
         self.code = ec_code
-        self.rtos = ec_rtos
         self.erro_log = []
         self.erro_total = 0
         self.files = get_dump_files(dump_file)
@@ -244,35 +271,33 @@ class embeddedCheck:
 
     def rule_1_2(self):
         """
-        Rule 1_2: All global variables assigment in IRS or Callback
+        Rule 1_2: All global variables assigment in ISR or Callback
         should be volatile
         """
 
         erro = 0
         var_erro_list_id = []
-        for ass in self.code.global_vars_with_ass:
-            # excluce specific types exceptions (rtos)
-            var_type = ass["variable"].typeStartToken.str
-            if [ele for ele in self.config["settings"]['irs_var_types_exceptions'] if (ele in var_type)]:
-                continue
-
-            # only check for var ass in IRS functions
-            if ass["className"] not in self.code.irs_functions_names:
+        for var in self.code.isr_global_vars:
+            # excluce specific types exceptions
+            var_type = var["variable"].typeStartToken.str
+            if [ele for ele in self.config["settings"]['isr_var_types_exceptions'] if (ele in var_type)]:
                 continue
 
             # skip duplicate error
-            if ass["variable"].Id in var_erro_list_id:
+            if var["variable"].Id in var_erro_list_id:
                 continue
 
-            if not ass["variable"].isVolatile:
-                var_name = ass["variable"].nameToken.str
-                func_name = ass["className"]
+            if not var["variable"].isVolatile:
+                var_name = var["variable"].nameToken.str
+                func_name = var["className"]
                 self.print_rule_violation(
                     'rule_1_2',
                     f"variable {var_name} in function {func_name}",
                 )
-                var_erro_list_id.append(ass["variable"].Id)
+
+                var_erro_list_id.append(var["variable"].Id)
                 erro = erro + 1
+
         return erro
 
     def rule_1_3(self):
@@ -281,14 +306,17 @@ class embeddedCheck:
         """
 
         erro = 0
-        exclude_ass = []
-        for ass in self.code.all_vars_with_ass:
-            if ass["className"] in self.code.irs_functions_names:
-                exclude_ass.append(ass['variable'].nameTokenId)
+        var_erro_list_id = []
 
         for ass in self.code.all_vars_with_ass:
-            # exclue IRS access vars
-            if ass['variable'].nameTokenId in exclude_ass:
+            if ass['variable'].Id in var_erro_list_id:
+                continue
+
+            # exclue ISR access vars
+            if ass['variable'].Id in self.code.isr_global_vars_id:
+                continue
+
+            if ass['variable'].isExtern:
                 continue
 
             if ass["variable"].isVolatile:
@@ -298,8 +326,57 @@ class embeddedCheck:
                     'rule_1_3',
                     f"variable {var_name} in function {func_name}",
                 )
+                var_erro_list_id.append(ass['variable'].Id)
                 erro = erro + 1
         return erro
+
+    def rule_1_4(self):
+        """
+        Rule 1_4: only use global vars for IRS
+        """
+
+        erro = 0
+
+        # interact in global avars only assigments
+        var_erro_list_id = []
+        for ass in self.code.global_vars_with_ass:
+            # excluce specific types exceptions (, lcd)
+            if ass["variable"].typeStartToken.str in self.config["rule_1_4"]['exceptions']:
+                continue
+
+            # exclude var that are accessed in Isr
+            if ass["variable"].Id in self.code.isr_global_vars_id:
+                continue
+
+            # skip duplicate error
+            if ass["variable"].Id in var_erro_list_id:
+                continue
+
+            # allow constant global var!
+            if ass['variable'].constness:
+                continue
+
+            if ass['variable'].isExtern:
+                v = self.code.search_extern_origin(ass)
+                if v is not None:
+                    if v['variable'].Id in var_erro_list_id:
+                        continue
+
+                    if v['variable'].Id in self.code.isr_global_vars_id:
+                        continue
+
+            # erro print
+            var_name = ass["variable"].nameToken.str
+            file_name = ass['file_name'].removesuffix('.dump')
+            self.print_rule_violation (
+                "rule_1_4",
+                f"{file_name}: global variable {var_name}",
+            )
+            var_erro_list_id.append(ass["variable"].Id)
+            erro = erro + 1
+
+        return erro
+
 
 
 def main():
@@ -316,7 +393,7 @@ def main():
         "--rtos",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="rtos specific config",
+        help=" specific config",
     )
     parser.add_argument(
         "--xml",
@@ -336,15 +413,16 @@ def main():
     dump_files = get_dump_files(args.check_path)
     for file in dump_files:
         dump = Dump(file)
-        code = ExtractCodeInfo(dump, ec_config)
-        ec_code.append(code)
+        ExtractCodeInfo(dump, ec_code, ec_config)
 
         if rtos:
             ExtractRtosInfo(dump, ec_config, ec_rtos)
 
-    ec = embeddedCheck(args.check_path, ec_config, ec_code, ec_rtos, rtos)
+    ec = embeddedCheck(args.check_path, ec_code, ec_config)
+
     ec.rule_1_2()
     ec.rule_1_3()
+    ec.rule_1_4()
 
     sys.exit(ec.erro_total)
 

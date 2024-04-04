@@ -9,8 +9,8 @@ def test_rule_1_2_wrong():
     stdout, stderr, return_code = run_check2(f"{test_name}.c.dump")
 
     expected_outputs = [
-        "[notVolatileVarIRS] variable pressed in function btn",
-        "[notVolatileVarIRS] variable unpressed in function btn"
+        "[notVolatileVarISR] variable pressed in function btn",
+        "[notVolatileVarISR] variable unpressed in function btn"
     ]
 
     for expected_output in expected_outputs:
