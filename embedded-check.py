@@ -247,7 +247,7 @@ class ExtractRtosInfo:
         return task_funcs
 
 
-class embeddedCheck:
+class bareMetalCheck:
     def __init__ (self, dump_file, ec_code, ec_config):
         self.config = ec_config.config
         self.code = ec_code
@@ -378,7 +378,6 @@ class embeddedCheck:
         return erro
 
 
-
 def main():
     parser = argparse.ArgumentParser(description="Process some dump c file")
     parser.add_argument(
@@ -418,13 +417,13 @@ def main():
         if rtos:
             ExtractRtosInfo(dump, ec_config, ec_rtos)
 
-    ec = embeddedCheck(args.check_path, ec_code, ec_config)
+    bare_metal = bareMetalCheck(args.check_path, ec_code, ec_config)
 
-    ec.rule_1_2()
-    ec.rule_1_3()
-    ec.rule_1_4()
+    bare_metal.rule_1_2()
+    bare_metal.rule_1_3()
+    bare_metal.rule_1_4()
 
-    sys.exit(ec.erro_total)
+    sys.exit(bare_metal.erro_total)
 
 if __name__ == "__main__":
     main()
